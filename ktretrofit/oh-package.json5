@@ -1,0 +1,15 @@
+{
+  "name": "ktretrofit",
+  "version": "1.0.0",
+  "description": "A Retrofit-like HTTP client for HarmonyOS ArkTS development",
+  "main": "Index.ets",
+  "author": "",
+  "license": "Apache-2.0",
+  "packageType": "InterfaceHar",
+  "dependencies": {
+    "@ohos.net.http": "1.0.0",
+    "@ohos.util": "1.0.0",
+    "@ohos.file.fs": "1.0.0",
+    "@ohos.app.ability.common": "1.0.0"
+  }
+}
