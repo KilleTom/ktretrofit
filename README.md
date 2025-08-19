@@ -20,7 +20,7 @@ KTRetrofit是一个基于HarmonyOS ArkTS开发的HTTP客户端库，灵感来源
 ```json5
 {
   "dependencies": {
-    "ktretrofit": "^1.0.0"
+    "ktretrofit": "^v1.0.0-alpha"
   }
 }
 ```
