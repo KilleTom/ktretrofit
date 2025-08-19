@@ -1,0 +1,32 @@
+{
+  "name": "@killetom/ktretrofit",
+  "version": "v1.0.0-alpha",
+  "description": "A Retrofit-like HTTP client for HarmonyOS ArkTS development",
+  "main": "Index.ets",
+  "scripts": {
+    "build": "echo 'Building ktretrofit module'",
+    "prepublishOnly": "npm run build"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/KilleTom/ktretrofit.git"
+  },
+  "keywords": [
+    "harmonyos",
+    "arkts",
+    "http",
+    "client",
+    "retrofit"
+  ],
+  "author": "",
+  "license": "Apache-2.0",
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com/"
+  },
+  "dependencies": {
+    "reflect-metadata": "^0.2.2"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.2"
+  }
+}
