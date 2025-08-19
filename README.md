@@ -52,22 +52,22 @@ interface CreateUserRequest {
   password: string;
 }
 
-// 用户API服务
-class UserService {
+// 用户API服务接口
+interface UserService {
   @GET('/users')
-  getUsers(@Query('page') page: number, @Query('limit') limit: number): Promise<User[]> {}
+  getUsers(@Query('page') page: number, @Query('limit') limit: number): Promise<User[]>;
 
   @GET('/users/{id}')
-  getUserById(@Path('id') id: number): Promise<User> {}
+  getUserById(@Path('id') id: number): Promise<User>;
 
   @POST('/users')
-  createUser(@Body() user: CreateUserRequest): Promise<User> {}
+  createUser(@Body() user: CreateUserRequest): Promise<User>;
 
   @PUT('/users/{id}')
-  updateUser(@Path('id') id: number, @Body() user: Partial<User>): Promise<User> {}
+  updateUser(@Path('id') id: number, @Body() user: Partial<User>): Promise<User>;
 
   @DELETE('/users/{id}')
-  deleteUser(@Path('id') id: number): Promise<void> {}
+  deleteUser(@Path('id') id: number): Promise<void>;
 }
 ```
 

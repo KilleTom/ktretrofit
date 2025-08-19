@@ -1,335 +1,514 @@
+/**
+ * Retrofit
+ * A type-safe HTTP client for Android and Java/Kotlin.
+ * This implementation is modeled after the official Retrofit library.
+ */
+
+import { HttpClient, HttpClientBuilder, Interceptor } from './client/HttpClient';
+import { ConverterFactory, StringConverterFactory, JsonConverterFactory } from './converter/Converter';
+import { Call, CallFactory } from './call/Call';
+import { MetadataUtil } from './util/MetadataUtil';
+import { HttpParameterType } from './http/param/HttpParameterType';
 import { HttpMethod } from './http/method/HttpMethod';
-import http from '@ohos.net.http';
-import { MetadataUtil } from './MetadataUtil';
+import { ApiServiceConfig,  } from './config/ApiConfig';
+import { DefaultCallFactory } from './call/DefaultCallFactory';
 
 /**
- * Retrofit core class
+ * Main class for creating and configuring API service instances.
+ * Note: This class should only be instantiated through the RetrofitBuilder.
  */
 export class Retrofit {
-  private baseUrl: string;
-  private headers: Record<string, string> = {};
-  private connectTimeout: number = 60000;
-  private readTimeout: number = 60000;
+  private readonly baseUrl: string;
+  private readonly client: HttpClient;
+  private readonly converterFactories: ConverterFactory[];
+  private readonly callFactory: CallFactory;
 
   /**
-   * Constructor for Retrofit instances
-   * This constructor is public to ensure compatibility with ArkTS
-   * Users should use RetrofitBuilder.build() instead of directly calling this constructor
+   * Private constructor - instances should be created using RetrofitBuilder.
+   * This constructor is public for technical reasons in ArkTS but should not be called directly.
    */
   constructor(builder: RetrofitBuilder) {
     this.baseUrl = builder.baseUrl;
-    this.headers = { ...builder.headers };
-    this.connectTimeout = builder.connectTimeout;
-    this.readTimeout = builder.readTimeout;
+    this.client = builder.client;
+    this.converterFactories = builder.converterFactories;
+    this.callFactory = new DefaultCallFactory(this.client, this.converterFactories);
   }
 
   /**
-   * Create API service instance
+   * Create an implementation of the API defined by the provided ApiServiceConfig.
+   * @param config The ApiServiceConfig defining the API service to create.
+   * @return An implementation of the API service interface.
    */
-  create<T>(service: new () => T): T {
-    const instance = new service();
-    const prototype = Object.getPrototypeOf(instance);
+  configService<T>(config: ApiServiceConfig<T>): T {
 
-    // Get all methods of the service
-    const methods = Object.getOwnPropertyNames(prototype)
-      .filter(name => name !== 'constructor')
-      .map(name => ({ name, descriptor: Object.getOwnPropertyDescriptor(prototype, name)! }));
-
-    // Wrap each method with HTTP request logic
-    for (const { name, descriptor } of methods) {
-      const originalMethod = descriptor.value;
-
-      descriptor.value = async function(...args: any[]) {
-        // Get method metadata
-        const method = MetadataUtil.getMetadata('retrofit:method', prototype, name) as HttpMethod;
-        const path = MetadataUtil.getMetadata('retrofit:path', prototype, name) as string;
-
-        if (!method || !path) {
-          throw new Error(`Method ${name} is not annotated with HTTP method decorator`);
-        }
-
-        // Get parameter metadata
-        const queryParams = MetadataUtil.getMetadata('retrofit:params:query', prototype, name) || [];
-        const queryMapParams = MetadataUtil.getMetadata('retrofit:params:queryMap', prototype, name) || [];
-        const queryNameParams = MetadataUtil.getMetadata('retrofit:params:queryName', prototype, name) || [];
-        const bodyParam = MetadataUtil.getMetadata('retrofit:params:body', prototype, name) || [];
-        const headerParams = MetadataUtil.getMetadata('retrofit:params:header', prototype, name) || [];
-        const headerMapParams = MetadataUtil.getMetadata('retrofit:params:headerMap', prototype, name) || [];
-        const pathParams = MetadataUtil.getMetadata('retrofit:params:path', prototype, name) || [];
-        const fieldParams = MetadataUtil.getMetadata('retrofit:params:field', prototype, name) || [];
-        const fieldMapParams = MetadataUtil.getMetadata('retrofit:params:fieldMap', prototype, name) || [];
-        const partParams = MetadataUtil.getMetadata('retrofit:params:part', prototype, name) || [];
-        const partMapParams = MetadataUtil.getMetadata('retrofit:params:partMap', prototype, name) || [];
-        const urlParams = MetadataUtil.getMetadata('retrofit:params:url', prototype, name) || [];
-        const cookieParams = MetadataUtil.getMetadata('retrofit:params:cookie', prototype, name) || [];
-        const tagParams = MetadataUtil.getMetadata('retrofit:params:tag', prototype, name) || [];
-
-        // Check if method is form url encoded or multipart
-        const isFormUrlEncoded = MetadataUtil.getMetadata('retrofit:formUrlEncoded', prototype, name) as boolean || false;
-        const isMultipart = MetadataUtil.getMetadata('retrofit:multipart', prototype, name) as boolean || false;
-
-        // Build URL
-        let url = `${this.baseUrl}${path}`;
-
-        // Replace with dynamic URL if provided
-        if (urlParams.length > 0) {
-          const dynamicUrl = args[urlParams[0].index];
-          if (dynamicUrl) {
-            url = dynamicUrl;
-          }
-        }
-
-        // Replace path parameters
-        for (const { index, key } of pathParams) {
-          const value = args[index];
-          url = url.replace(`{${key}}`, encodeURIComponent(value));
-        }
-
-        // Build query parameters
-        const query = new Map<string, string>();
-        for (const { index, key } of queryParams) {
-          const value = args[index];
-          if (value !== undefined && value !== null) {
-            query.set(key, String(value));
-          }
-        }
-
-        // Add query map parameters
-        for (const { index } of queryMapParams) {
-          const value = args[index];
-          if (value !== undefined && value !== null && typeof value === 'object') {
-            Object.entries(value).forEach(([k, v]) => {
-              if (v !== undefined && v !== null) {
-                query.set(k, String(v));
-              }
-            });
-          }
-        }
-
-        // Add query name parameters
-        for (const { index, key } of queryNameParams) {
-          const value = args[index];
-          if (value !== undefined && value !== null) {
-            if (Array.isArray(value)) {
-              value.forEach(v => {
-                if (v !== undefined && v !== null) {
-                  query.set(key, String(v));
-                }
-              });
-            } else {
-              query.set(key, String(value));
-            }
-          }
-        }
-
-        // Add query parameters to URL
-        if (query.size > 0) {
-          url += '?' + Array.from(query.entries())
-            .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
-            .join('&');
-        }
-
-        // Build headers
-        const headers = { ...this.headers };
-        for (const { index, key } of headerParams) {
-          const value = args[index];
-          if (value !== undefined && value !== null) {
-            headers[key] = String(value);
-          }
-        }
-
-        // Add header map parameters
-        for (const { index } of headerMapParams) {
-          const value = args[index];
-          if (value !== undefined && value !== null && typeof value === 'object') {
-            Object.entries(value).forEach(([k, v]) => {
-              if (v !== undefined && v !== null) {
-                headers[k] = String(v);
-              }
-            });
-          }
-        }
-
-        // Add cookie parameters
-        const cookies: string[] = [];
-        for (const { index, key } of cookieParams) {
-          const value = args[index];
-          if (value !== undefined && value !== null) {
-            cookies.push(`${key}=${encodeURIComponent(String(value))}`);
-          }
-        }
-        if (cookies.length > 0) {
-          headers['Cookie'] = cookies.join('; ');
-        }
-
-        // Get request body
-        let body: any = null;
-        if (bodyParam.length > 0) {
-          body = args[bodyParam[0].index];
-        }
-
-        // Handle form url encoded
-        if (isFormUrlEncoded) {
-          const formData = new Map<string, string>();
-          
-          // Add field parameters
-          for (const { index, key } of fieldParams) {
-            const value = args[index];
-            if (value !== undefined && value !== null) {
-              formData.set(key, String(value));
-            }
-          }
-          
-          // Add field map parameters
-          for (const { index } of fieldMapParams) {
-            const value = args[index];
-            if (value !== undefined && value !== null && typeof value === 'object') {
-              Object.entries(value).forEach(([k, v]) => {
-                if (v !== undefined && v !== null) {
-                  formData.set(k, String(v));
-                }
-              });
-            }
-          }
-          
-          // Convert form data to URL encoded string
-          body = Array.from(formData.entries())
-            .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
-            .join('&');
-          
-          headers['Content-Type'] = 'application/x-www-form-urlencoded';
-        }
-
-        // Handle multipart (simplified implementation)
-        if (isMultipart) {
-          // In a real implementation, this would handle file uploads and complex multipart data
-          // For now, we'll just set the content type
-          headers['Content-Type'] = 'multipart/form-data';
-        }
-
-        // 使用ArkTS实现HTTP请求
-        const httpRequest = http.createHttp();
-        try {
-          // 将自定义HttpMethod枚举转换为ArkTS的RequestMethod枚举
-          let requestMethod: http.RequestMethod;
-          switch (method) {
-            case HttpMethod.POST:
-              requestMethod = http.RequestMethod.POST;
-              break;
-            case HttpMethod.PUT:
-              requestMethod = http.RequestMethod.PUT;
-              break;
-            case HttpMethod.DELETE:
-              requestMethod = http.RequestMethod.DELETE;
-              break;
-            // case HttpMethod.PATCH:
-            //   requestMethod = http.RequestMethod.PATCH;
-            //   break;
-            case HttpMethod.HEAD:
-              requestMethod = http.RequestMethod.HEAD;
-              break;
-            case HttpMethod.OPTIONS:
-              requestMethod = http.RequestMethod.OPTIONS;
-              break;
-            default:
-              requestMethod = http.RequestMethod.GET;
-          }
-          
-          // 准备请求参数
-          const requestOptions: http.HttpRequestOptions = {
-            method: requestMethod,
-            header: headers,
-            extraData: body,
-            connectTimeout: this.connectTimeout,
-            readTimeout: this.readTimeout
-          };
-
-          // 发送请求
-          const response = await httpRequest.request(url, requestOptions);
-
-          // 处理响应
-          if (response.responseCode === 200) {
-            // 解析JSON响应
-            return JSON.parse(response.result.toString());
-          } else {
-            // 处理错误响应
-            throw new Error(`请求失败，状态码: ${response.responseCode}，响应内容: ${response.result}`);
-          }
-        } catch (error) {
-          // 处理网络异常
-          throw new Error(`网络错误: ${error}`);
-        } finally {
-          // 销毁HTTP请求资源
-          httpRequest.destroy();
-        }
-      };
-
-      Object.defineProperty(prototype, name, descriptor);
+    if (!config || !config.methods) {
+      throw new Error('Valid ApiServiceConfig must be provided');
     }
 
-    return instance;
+    const currentServiceName = config.serviceName
+    // Check if serviceName is provided and valid
+
+    if (!currentServiceName || currentServiceName.trim() === '') {
+      throw new Error('ApiServiceConfig.serviceName is required and cannot be empty or whitespace');
+    }
+
+    const proxy: Record<string, any> = {};
+    
+    // Process each method configuration
+    for (const [methodName, methodConfig] of Object.entries(config.methods)) {
+      proxy[methodName] = (...args: any[]) => {
+        // Create a mock method object with metadata
+        const mockMethod = function() {};
+        
+        // Apply HTTP method and path metadata
+        MetadataUtil.defineHttpMethod(HttpMethod[methodConfig.method], methodConfig.path, mockMethod, methodName);
+        
+        // Apply form encoded/multipart metadata if specified
+        if (methodConfig.isFormEncoded) {
+          MetadataUtil.markFormUrlEncoded(mockMethod, methodName);
+        }
+        if (methodConfig.isMultipart) {
+          MetadataUtil.markMultipart(mockMethod, methodName);
+        }
+        
+        // Apply parameter metadata
+        if (methodConfig.parameters) {
+          for (const [paramIndex, paramConfig] of Object.entries(methodConfig.parameters)) {
+            const index = Number(paramIndex);
+            
+            switch (paramConfig.type) {
+              case HttpParameterType.PATH:
+                MetadataUtil.definePathParameter(index, paramConfig.name, mockMethod, methodName);
+                break;
+              case HttpParameterType.QUERY:
+                MetadataUtil.defineQueryParameter(index, paramConfig.name, mockMethod, methodName);
+                break;
+              case HttpParameterType.QUERY_MAP:
+                MetadataUtil.defineQueryMapParameter(index, mockMethod, methodName);
+                break;
+              case HttpParameterType.HEADER:
+                MetadataUtil.defineHeaderParameter(index, paramConfig.name, mockMethod, methodName);
+                break;
+              case HttpParameterType.HEADER_MAP:
+                MetadataUtil.defineHeaderMapParameter(index, mockMethod, methodName);
+                break;
+              case HttpParameterType.BODY:
+                MetadataUtil.defineBodyParameter(index, mockMethod, methodName);
+                break;
+              case HttpParameterType.FIELD:
+                MetadataUtil.defineFieldParameter(index, paramConfig.name, mockMethod, methodName);
+                break;
+              case HttpParameterType.FIELD_MAP:
+                MetadataUtil.defineFieldMapParameter(index, mockMethod, methodName);
+                break;
+              case HttpParameterType.PART:
+              case HttpParameterType.PART_MAP:
+              case HttpParameterType.URL:
+              case HttpParameterType.COOKIE:
+              case HttpParameterType.TAG:
+              case HttpParameterType.QUERY_NAME:
+                // For other parameter types
+                const params = MetadataUtil.getMetadata(`retrofit:params:${HttpParameterType[paramConfig.type]}`, mockMethod, methodName) || [];
+                params.push({ index, key: paramConfig.name });
+                MetadataUtil.defineMetadata(`retrofit:params:${HttpParameterType[paramConfig.type]}`, params, mockMethod, methodName);
+                break;
+            }
+          }
+        }
+        
+
+        return this.createCall(mockMethod, args, currentServiceName, methodName);
+      };
+    }
+    
+    return proxy as T;
+  }
+
+  private createCall(method: Function, args: any[], serviceName: string, methodName: string): Call<any> {
+    const metadata = MetadataUtil.getMethodMetadata(method);
+    
+    if (!metadata) {
+      throw new Error(`No HTTP method annotation found for ${serviceName}.${methodName}`);
+    }
+
+    const httpMethod = metadata.httpMethod;
+    let path = metadata.path || '';
+    const isFormEncoded = metadata.isFormEncoded || false;
+    const isMultipart = metadata.isMultipart || false;
+
+    // Process path parameters
+    const pathParams = MetadataUtil.getPathParameters(method);
+    if (pathParams) {
+      for (const [paramIndex, paramName] of Object.entries(pathParams)) {
+        const value = args[Number(paramIndex)];
+        if (value !== undefined) {
+          path = path.replace(new RegExp(`\\{${paramName}\\}`, 'g'), encodeURIComponent(value));
+        }
+      }
+    }
+
+    // Build URL
+    const url = this.createUrl(this.baseUrl, path);
+
+    // Create request configuration
+    const requestConfig = {
+      url,
+      method: httpMethod,
+      headers: this.buildHeaders(method, args),
+      body: this.buildRequestBody(method, args, isFormEncoded, isMultipart),
+      queryParams: this.buildQueryParams(method, args),
+      isFormEncoded,
+      isMultipart
+    };
+
+    // Create and return a Call object
+    return this.callFactory.newCall<any>(requestConfig);
+  }
+
+  private createUrl(baseUrl: string, path: string): string {
+    let url = baseUrl;
+    
+    // Ensure baseUrl ends with / if path starts with /
+    if (path.startsWith('/') && !url.endsWith('/')) {
+      url += '/';
+    }
+    
+    // Ensure baseUrl doesn't have duplicate / with path
+    if (!path.startsWith('/') && url.endsWith('/')) {
+      url = url.substring(0, url.length - 1);
+    }
+    
+    return url + path;
+  }
+
+  private buildHeaders(method: Function, args: any[]): Record<string, string> {
+    const headers: Record<string, string> = {};
+    const headerParams = MetadataUtil.getHeaderParameters(method);
+    const headerMapParams = MetadataUtil.getHeaderMapParameters(method);
+
+    if (headerParams) {
+      for (const [paramIndex, paramName] of Object.entries(headerParams)) {
+        const value = args[Number(paramIndex)];
+        if (value !== undefined) {
+          headers[paramName] = value.toString();
+        }
+      }
+    }
+
+    if (headerMapParams) {
+      for (const paramIndex of headerMapParams) {
+        const headerMap = args[Number(paramIndex)];
+        if (headerMap && typeof headerMap === 'object') {
+          for (const [key, value] of Object.entries(headerMap)) {
+            headers[key] = value.toString();
+          }
+        }
+      }
+    }
+
+    return headers;
+  }
+
+  private buildQueryParams(method: Function, args: any[]): Record<string, string> {
+    const queryParams: Record<string, string> = {};
+    const queryParamsMap = MetadataUtil.getQueryParameters(method);
+    const queryMapParams = MetadataUtil.getQueryMapParameters(method);
+
+    if (queryParamsMap) {
+      for (const [paramIndex, paramName] of Object.entries(queryParamsMap)) {
+        const value = args[Number(paramIndex)];
+        if (value !== undefined) {
+          queryParams[paramName] = value.toString();
+        }
+      }
+    }
+
+    if (queryMapParams) {
+      for (const paramIndex of queryMapParams) {
+        const queryMap = args[Number(paramIndex)];
+        if (queryMap && typeof queryMap === 'object') {
+          for (const [key, value] of Object.entries(queryMap)) {
+            queryParams[key] = value.toString();
+          }
+        }
+      }
+    }
+
+    return queryParams;
+  }
+
+  private buildRequestBody(method: Function, args: any[], isFormEncoded: boolean, isMultipart: boolean): any {
+    const bodyParam = MetadataUtil.getBodyParameter(method);
+    const fieldParams = MetadataUtil.getFieldParameters(method);
+    const fieldMapParams = MetadataUtil.getFieldMapParameters(method);
+    const partParams = MetadataUtil.getPartParameters(method);
+    const partMapParams = MetadataUtil.getPartMapParameters(method);
+
+    if (bodyParam !== -1) {
+      return args[bodyParam];
+    }
+
+    if (isFormEncoded) {
+      const formData: Record<string, string> = {};
+      
+      if (fieldParams) {
+        for (const [paramIndex, paramName] of Object.entries(fieldParams)) {
+          const value = args[Number(paramIndex)];
+          if (value !== undefined) {
+            formData[paramName] = value.toString();
+          }
+        }
+      }
+
+      if (fieldMapParams) {
+        for (const paramIndex of fieldMapParams) {
+          const fieldMap = args[Number(paramIndex)];
+          if (fieldMap && typeof fieldMap === 'object') {
+            for (const [key, value] of Object.entries(fieldMap)) {
+              formData[key] = value.toString();
+            }
+          }
+        }
+      }
+
+      // Use JSON converter for form data to ensure type safety
+      for (const factory of this.converterFactories) {
+        const converter = factory.requestBodyConverter(Object);
+        if (converter) {
+          try {
+            return converter.convert(formData);
+          } catch (e) {
+            // Failed to convert with this factory, continue
+            continue;
+          }
+        }
+      }
+      
+      return formData;
+    } else if (isMultipart) {
+      const multipartData: Record<string, any> = { parts: [] };
+      
+      // Process part parameters
+      if (partParams) {
+        for (const [paramIndex, paramName] of Object.entries(partParams)) {
+          const value = args[Number(paramIndex)];
+          if (value !== undefined) {
+            multipartData.parts.push({
+              name: paramName,
+              value: value
+            });
+          }
+        }
+      }
+
+      // Process part map parameters
+      if (partMapParams) {
+        for (const paramIndex of partMapParams) {
+          const partMap = args[Number(paramIndex)];
+          if (partMap && typeof partMap === 'object') {
+            for (const [key, value] of Object.entries(partMap)) {
+              multipartData.parts.push({
+                name: key,
+                value: value
+              });
+            }
+          }
+        }
+      }
+
+      // Use JSON converter for multipart data to ensure type safety
+      for (const factory of this.converterFactories) {
+        const converter = factory.requestBodyConverter(Object);
+        if (converter) {
+          try {
+            return converter.convert(multipartData);
+          } catch (e) {
+            // Failed to convert with this factory, continue
+            continue;
+          }
+        }
+      }
+      
+      return multipartData;
+    }
+
+    return null;
+  }
+
+  /**
+   * Returns a new {@link RetrofitBuilder} to create a new {@link Retrofit} instance.
+   */
+  static builder(): RetrofitBuilder {
+    return new RetrofitBuilder();
   }
 }
 
 /**
- * Retrofit Builder class to configure and create Retrofit instances
+ * Builder for creating {@link Retrofit} instances.
  */
 export class RetrofitBuilder {
-  baseUrl: string;
-  headers: Record<string, string> = {};
-  connectTimeout: number = 60000;
-  readTimeout: number = 60000;
+    baseUrl: string = '';
+    client: HttpClient = new HttpClientBuilder().build();
+    converterFactories: ConverterFactory[] = [
+      StringConverterFactory.create(),
+      JsonConverterFactory.create()
+    ];
+    defaultHeaders: Record<string, string> = {
+      'Content-Type': 'application/json',
+      'Accept': 'application/json'
+    };
 
-  /**
-   * Constructor with required base URL
-   */
-  constructor(baseUrl: string) {
-    this.baseUrl = baseUrl;
-  }
-
-  /**
-   * Add default header
-   */
-  addHeader(key: string, value: string): RetrofitBuilder {
-    this.headers[key] = value;
-    return this;
-  }
-
-  /**
-   * Add multiple default headers
-   */
-  addHeaders(headers: Record<string, string>): RetrofitBuilder {
-    this.headers = { ...this.headers, ...headers };
-    return this;
-  }
-
-  /**
-   * Set connection timeout in milliseconds
-   */
-  setConnectTimeout(timeout: number): RetrofitBuilder {
-    this.connectTimeout = timeout;
-    return this;
-  }
-
-  /**
-   * Set read timeout in milliseconds
-   */
-  setReadTimeout(timeout: number): RetrofitBuilder {
-    this.readTimeout = timeout;
-    return this;
-  }
-
-  /**
-     * Build and return a Retrofit instance
+    /**
+     * Set the base URL for HTTP requests.
      */
-    build(): Retrofit {
-      return new Retrofit(this);
+    setBaseUrl(baseUrl: string): RetrofitBuilder {
+      this.baseUrl = baseUrl;
+      return this;
     }
+
+    /**
+     * Set the HTTP client to use for requests.
+     */
+    setHttpClient(client: HttpClient): RetrofitBuilder {
+      this.client = client;
+      return this;
+    }
+
+    /**
+     * Add a converter factory for serialization and deserialization of objects.
+     */
+    addConverterFactory(factory: ConverterFactory): RetrofitBuilder {
+      this.converterFactories.unshift(factory);
+      return this;
+    }
+
+    /**
+     * Add a default header to all requests.
+     */
+    addHeader(key: string, value: string): RetrofitBuilder {
+      this.defaultHeaders[key] = value;
+      return this;
+    }
+
+    /**
+     * Add multiple default headers to all requests.
+     */
+    addHeaders(headers: Record<string, string>): RetrofitBuilder {
+      this.defaultHeaders = { ...this.defaultHeaders, ...headers };
+      return this;
+    }
+
+    /**
+     * Add an interceptor to the HTTP client.
+     * @param interceptor The interceptor to add.
+     * @returns This builder instance for method chaining.
+     */
+    addInterceptor(interceptor: Interceptor): RetrofitBuilder {
+      // Create a new HttpClientBuilder with the existing client's configuration
+      const newClientBuilder = new HttpClientBuilder();
+
+      // Add all existing interceptors from the current client
+      if (typeof (this.client as any).interceptors === 'object') {
+        newClientBuilder.addInterceptors((this.client as any).interceptors || []);
+      }
+
+      // Add the new interceptor
+      newClientBuilder.addInterceptor(interceptor);
+
+      // Update the client with the new builder
+      this.client = newClientBuilder.build();
+      return this;
+    }
+
+    /**
+     * Add multiple interceptors to the HTTP client.
+     * @param interceptors The list of interceptors to add.
+     * @returns This builder instance for method chaining.
+     */
+    addInterceptors(interceptors: Interceptor[]): RetrofitBuilder {
+      // Create a new HttpClientBuilder with the existing client's configuration
+      const newClientBuilder = new HttpClientBuilder();
+
+      // Add all existing interceptors from the current client
+      if (typeof (this.client as any).interceptors === 'object') {
+        newClientBuilder.addInterceptors((this.client as any).interceptors || []);
+      }
+
+      // Add the new interceptors
+      newClientBuilder.addInterceptors(interceptors);
+
+      // Update the client with the new builder
+      this.client = newClientBuilder.build();
+      return this;
+    }
+
+    /**
+     * Set the connection timeout for HTTP requests.
+     * @param timeout Timeout in milliseconds.
+     * @returns This builder instance for method chaining.
+     */
+    setConnectTimeout(timeout: number): RetrofitBuilder {
+      // Create a new HttpClientBuilder with the existing client's configuration
+      const newClientBuilder = new HttpClientBuilder();
+      
+      // Add all existing interceptors from the current client
+      if (typeof (this.client as any).interceptors === 'object') {
+        newClientBuilder.addInterceptors((this.client as any).interceptors || []);
+      }
+      
+      // Set the new connect timeout
+      newClientBuilder.setConnectTimeout(timeout);
+      
+      // Update the client with the new builder
+      this.client = newClientBuilder.build();
+      return this;
+    }
+    
+    /**
+     * Set the read timeout for HTTP requests.
+     * @param timeout Timeout in milliseconds.
+     * @returns This builder instance for method chaining.
+     */
+    setReadTimeout(timeout: number): RetrofitBuilder {
+      // Create a new HttpClientBuilder with the existing client's configuration
+      const newClientBuilder = new HttpClientBuilder();
+      
+      // Add all existing interceptors from the current client
+      if (typeof (this.client as any).interceptors === 'object') {
+        newClientBuilder.addInterceptors((this.client as any).interceptors || []);
+      }
+      
+      // Set the new read timeout
+      newClientBuilder.setReadTimeout(timeout);
+      
+      // Update the client with the new builder
+      this.client = newClientBuilder.build();
+      return this;
+    }
+
+    /**
+   * Build the {@link Retrofit} instance.
+   */
+  build(): Retrofit {
+    if (!this.baseUrl) {
+      throw new Error('Base URL is required');
+    }
+
+    return new Retrofit(this);
   }
+}
+
+
+
 
 /**
- * Create Retrofit builder with base URL
+ * Helper function to create a new {@link RetrofitBuilder} instance.
+ * @param baseUrl Optional base URL to set immediately on the builder
  */
-export function createRetrofit(baseUrl: string): RetrofitBuilder {
-  return new RetrofitBuilder(baseUrl);
+export function createRetrofit(baseUrl?: string): RetrofitBuilder {
+  const builder = Retrofit.builder();
+  if (baseUrl) {
+    builder.setBaseUrl(baseUrl);
+  }
+  return builder;
 }

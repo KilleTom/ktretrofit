@@ -1,1 +1,1 @@
-export enum HttpMethod { GET, POST, PUT, DELETE, HEAD, OPTIONS }
+export enum HttpMethod { GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS }

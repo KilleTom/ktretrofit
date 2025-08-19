@@ -7,9 +7,5 @@
   "license": "Apache-2.0",
   "packageType": "InterfaceHar",
   "dependencies": {
-    "@ohos.net.http": "1.0.0",
-    "@ohos.util": "1.0.0",
-    "@ohos.file.fs": "1.0.0",
-    "@ohos.app.ability.common": "1.0.0"
   }
 }
